@@ -43,6 +43,30 @@ class SageMakerResponse(BaseResponse):
         )
         return json.dumps({"EndpointConfigArn": new_config.arn})
 
+    def create_transform_job(self):
+        """
+        Handler for the SageMaker "CreateTransformJob" API call documented here:
+        https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_CreateTransformJob.html.
+        """
+        job_name = self.request_params["TransformJobName"]
+        model_name = self.request_params.get("ModelName")
+        transform_input = self.request_params.get("TransformInput")
+        transform_output = self.request_params.get("TransformOutput")
+        transform_resources = self.request_params.get("TransformResources")
+        data_processing = self.request_params.get("DataProcessing")
+        tags = self.request_params.get("Tags", [])
+        new_job = self.sagemaker_backend.create_transform_job(
+            job_name=job_name,
+            model_name=model_name,
+            transform_input=transform_input,
+            transform_output=transform_output,
+            transform_resources=transform_resources,
+            data_processing=data_processing,
+            tags=tags,
+            region_name=self.region,
+        )
+        return json.dumps({"TransformJobArn": new_job.arn})
+
     def describe_endpoint_config(self):
         """
         Handler for the SageMaker "DescribeEndpoint" API call documented here:
@@ -59,6 +83,15 @@ class SageMakerResponse(BaseResponse):
         """
         config_name = self.request_params["EndpointConfigName"]
         self.sagemaker_backend.delete_endpoint_config(config_name)
+        return ""
+
+    def stop_transform_job(self):
+        """
+        Handler for the SageMaker "DeleteEndpointConfig" API call documented here:
+        https://docs.aws.amazon.com/sagemaker/latest/dg/API_DeleteEndpointConfig.html.
+        """
+        job_name = self.request_params["TransformJobName"]
+        self.sagemaker_backend.stop_transform_job(job_name)
         return ""
 
     def create_endpoint(self):
@@ -85,6 +118,15 @@ class SageMakerResponse(BaseResponse):
         endpoint_name = self.request_params["EndpointName"]
         endpoint_description = self.sagemaker_backend.describe_endpoint(endpoint_name)
         return json.dumps(endpoint_description.response_object)
+
+    def describe_transform_job(self):
+        """
+        Handler for the SageMaker "DescribeTransformJob" API call documented here:
+        https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_DescribeTransformJob.html.
+        """
+        job_name = self.request_params["TransformJobName"]
+        transform_job_description = self.sagemaker_backend.describe_transform_job(job_name)
+        return json.dumps(transform_job_description.response_object)
 
     def update_endpoint(self):
         """
@@ -132,6 +174,23 @@ class SageMakerResponse(BaseResponse):
         endpoint_config_summaries = self.sagemaker_backend.list_endpoint_configs()
         return json.dumps(
             {"EndpointConfigs": [summary.response_object for summary in endpoint_config_summaries]}
+        )
+
+    def list_transform_jobs(self):
+        """
+        Handler for the SageMaker "ListTransformJobs" API call documented here:
+        https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_ListTransformJobs.html.
+
+        This function does not support pagination. All endpoint configs are returned in a
+        single response.
+        """
+        transform_job_summaries = self.sagemaker_backend.list_transform_jobs()
+        return json.dumps(
+            {
+                "TransformJobSummaries": [
+                    summary.response_object for summary in transform_job_summaries
+                ]
+            }
         )
 
     def list_models(self):
@@ -196,6 +255,8 @@ class SageMakerBackend(BaseBackend):
         self.endpoints = {}
         self.endpoint_configs = {}
         self._endpoint_update_latency_seconds = 0
+        self._transform_job_update_latency_seconds = 0
+        self.transform_jobs = {}
 
     def set_endpoint_update_latency(self, latency_seconds):
         """
@@ -205,6 +266,13 @@ class SageMakerBackend(BaseBackend):
         """
         self._endpoint_update_latency_seconds = latency_seconds
 
+    def set_transform_job_update_latency(self, latency_seconds):
+        """
+        Sets the latency for the following operations that update endpoint state:
+        - "create_transform_job"
+        """
+        self._transform_job_update_latency_seconds = latency_seconds
+
     def set_endpoint_latest_operation(self, endpoint_name, operation):
         if endpoint_name not in self.endpoints:
             raise ValueError(
@@ -212,6 +280,14 @@ class SageMakerBackend(BaseBackend):
                 " that does not exist!"
             )
         self.endpoints[endpoint_name].resource.latest_operation = operation
+
+    def set_transform_job_latest_operation(self, transform_job_name, operation):
+        if transform_job_name not in self.transform_jobs:
+            raise ValueError(
+                "Attempted to manually set the latest operation for a transform job"
+                " that does not exist!"
+            )
+        self.transform_jobs[transform_job_name].resource.latest_operation = operation
 
     @property
     def _url_module(self):
@@ -275,6 +351,21 @@ class SageMakerBackend(BaseBackend):
         config = self.endpoint_configs[config_name]
         return EndpointConfigDescription(config=config.resource, arn=config.arn)
 
+    def describe_transform_job(self, job_name):
+        """
+        Modifies backend state during calls to the SageMaker "DescribeTransformJob" API
+        documented here:
+        https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_DescribeTransformJob.html.
+        """
+        if job_name not in self.transform_jobs:
+            raise ValueError(
+                "Attempted to describe a transform job with name: `{job_name}`"
+                " that does not exist.".format(job_name=job_name)
+            )
+
+        transform_job = self.transform_jobs[job_name]
+        return TransformJobDescription(transform_job=transform_job.resource, arn=transform_job.arn)
+
     def delete_endpoint_config(self, config_name):
         """
         Modifies backend state during calls to the SageMaker "DeleteEndpointConfig" API
@@ -288,6 +379,20 @@ class SageMakerBackend(BaseBackend):
             )
 
         del self.endpoint_configs[config_name]
+
+    def stop_transform_job(self, job_name):
+        """
+        Modifies backend state during calls to the SageMaker "StopTransformJob" API
+        documented here:
+        https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_StopTransformJob.html.
+        """
+        if job_name not in self.transform_jobs:
+            raise ValueError(
+                "Attempted to stop a transform job with name: `{job_name}`"
+                " that does not exist.".format(job_name=job_name)
+            )
+
+        del self.transform_jobs[job_name]
 
     def create_endpoint(self, endpoint_name, endpoint_config_name, tags, region_name):
         """
@@ -322,6 +427,52 @@ class SageMakerBackend(BaseBackend):
         new_endpoint_arn = self._get_base_arn(region_name=region_name) + new_endpoint.arn_descriptor
         new_resource = SageMakerResourceWithArn(resource=new_endpoint, arn=new_endpoint_arn)
         self.endpoints[endpoint_name] = new_resource
+        return new_resource
+
+    def create_transform_job(
+        self,
+        job_name,
+        model_name,
+        transform_input,
+        transform_output,
+        transform_resources,
+        data_processing,
+        tags,
+        region_name,
+    ):
+        """
+        Modifies backend state during calls to the SageMaker "CreateTransformJob" API
+        documented here:
+        https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_CreateTransformJob.html.
+        """
+        if job_name in self.transform_jobs:
+            raise ValueError(
+                "Attempted to create a transform job with name:"
+                " {job_name}, but a transform job with this"
+                " name already exists.".format(job_name=job_name)
+            )
+
+        if model_name not in self.models:
+            raise ValueError(
+                "Attempted to create a transform job with a model named:"
+                " `{model_name}` However, this model does not exist.".format(model_name=model_name)
+            )
+
+        new_job = TransformJob(
+            job_name=job_name,
+            model_name=model_name,
+            transform_input=transform_input,
+            transform_output=transform_output,
+            transform_resources=transform_resources,
+            data_processing=data_processing,
+            tags=tags,
+            latest_operation=TransformOperation.create_successful(
+                latency_seconds=self._transform_job_update_latency_seconds
+            ),
+        )
+        new_job_arn = self._get_base_arn(region_name=region_name) + new_job.arn_descriptor
+        new_resource = SageMakerResourceWithArn(resource=new_job, arn=new_job_arn)
+        self.transform_jobs[job_name] = new_resource
         return new_resource
 
     def describe_endpoint(self, endpoint_name):
@@ -391,6 +542,20 @@ class SageMakerBackend(BaseBackend):
         summaries = []
         for _, endpoint in self.endpoints.items():
             summary = EndpointSummary(endpoint=endpoint.resource, arn=endpoint.arn)
+            summaries.append(summary)
+        return summaries
+
+    def list_transform_jobs(self):
+        """
+        Modifies backend state during calls to the SageMaker "ListTransformJobs" API
+        documented here:
+        https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_ListTransformJobs.html.
+        """
+        summaries = []
+        for _, transform_job in self.transform_jobs.items():
+            summary = TransformJobSummary(
+                transform_job=transform_job.resource, arn=transform_job.arn
+            )
             summaries.append(summary)
         return summaries
 
@@ -477,7 +642,6 @@ class SageMakerBackend(BaseBackend):
 
 
 class TimestampedResource(BaseModel):
-
     TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
 
     def __init__(self):
@@ -514,6 +678,49 @@ class Endpoint(TimestampedResource):
     @property
     def arn_descriptor(self):
         return ":endpoint/{endpoint_name}".format(endpoint_name=self.endpoint_name)
+
+    @property
+    def status(self):
+        return self.latest_operation.status()
+
+
+class TransformJob(TimestampedResource):
+
+    """
+    Object representing a SageMaker transform job. The SageMakerBackend will create
+    and manage transform jobs.
+    """
+
+    STATUS_IN_PROGRESS = "InProgress"
+    STATUS_FAILED = "Failed"
+    STATUS_COMPLETED = "Completed"
+    STATUS_STOPPING = "Stopping"
+    STATUS_STOPPED = "Stopped"
+
+    def __init__(
+        self,
+        job_name,
+        model_name,
+        transform_input,
+        transform_output,
+        transform_resources,
+        data_processing,
+        tags,
+        latest_operation,
+    ):
+        super().__init__()
+        self.job_name = job_name
+        self.model_name = model_name
+        self.transform_input = transform_input
+        self.transform_output = transform_output
+        self.transform_resources = transform_resources
+        self.data_processing = data_processing
+        self.tags = tags
+        self.latest_operation = latest_operation
+
+    @property
+    def arn_descriptor(self):
+        return ":transform-job/{job_name}".format(job_name=self.job_name)
 
     @property
     def status(self):
@@ -581,6 +788,59 @@ class EndpointOperation:
         )
 
 
+class TransformOperation:
+    """
+    Object representing a SageMaker transform job operation ("create" or "stop"). Every
+    transform job is associated with the operation that was most recently invoked on it.
+    """
+
+    def __init__(self, latency_seconds, pending_status, completed_status):
+        """
+        :param latency: The latency of the operation, in seconds. Before the time window specified
+                        by this latency elapses, the operation will have the status specified by
+                        ``pending_status``. After the time window elapses, the operation will
+                        have the status  specified by ``completed_status``.
+        :param pending_status: The status that the operation should reflect *before* the latency
+                               window has elapsed.
+        :param completed_status: The status that the operation should reflect *after* the latency
+                                 window has elapsed.
+        """
+        self.latency_seconds = latency_seconds
+        self.pending_status = pending_status
+        self.completed_status = completed_status
+        self.start_time = time.time()
+
+    def status(self):
+        if time.time() - self.start_time < self.latency_seconds:
+            return self.pending_status
+        else:
+            return self.completed_status
+
+    @classmethod
+    def create_successful(cls, latency_seconds):
+        return cls(
+            latency_seconds=latency_seconds,
+            pending_status=TransformJob.STATUS_IN_PROGRESS,
+            completed_status=TransformJob.STATUS_COMPLETED,
+        )
+
+    @classmethod
+    def create_unsuccessful(cls, latency_seconds):
+        return cls(
+            latency_seconds=latency_seconds,
+            pending_status=TransformJob.STATUS_IN_PROGRESS,
+            completed_status=TransformJob.STATUS_FAILED,
+        )
+
+    @classmethod
+    def stop_successful(cls, latency_seconds):
+        return cls(
+            latency_seconds=latency_seconds,
+            pending_status=TransformJob.STATUS_STOPPING,
+            completed_status=TransformJob.STATUS_STOPPED,
+        )
+
+
 class EndpointSummary:
     """
     Object representing an endpoint entry in the endpoints list returned by
@@ -626,6 +886,30 @@ class EndpointDescription:
             "EndpointStatus": self.endpoint.status,
             "CreationTime": self.endpoint.creation_time,
             "LastModifiedTime": self.endpoint.last_modified_time,
+        }
+        return response
+
+
+class TransformJobDescription:
+    """
+    Object representing an endpoint description returned by SageMaker's
+    "DescribeTransformJob" API:
+    https://docs.aws.amazon.com/sagemaker/latest/dg/API_DescribeEndpoint.html.
+    """
+
+    def __init__(self, transform_job, arn):
+        self.transform_job = transform_job
+        self.arn = arn
+
+    @property
+    def response_object(self):
+        response = {
+            "TransformJobName": self.transform_job.job_name,
+            "TransformJobArn": self.arn,
+            "CreationTime": self.transform_job.creation_time,
+            "LastModifiedTime": self.transform_job.last_modified_time,
+            "TransformJobStatus": self.transform_job.status,
+            "ModelName": self.transform_job.model_name,
         }
         return response
 
@@ -747,6 +1031,28 @@ class ModelDescription:
             "ExecutionRoleArn": self.model.execution_role_arn,
             "VpcConfig": self.model.vpc_config if self.model.vpc_config else {},
             "CreationTime": self.model.creation_time,
+        }
+        return response
+
+
+class TransformJobSummary:
+    """
+    Object representing a TransformJobSummary entry in the TransformJobSummaries list returned by
+    SageMaker's "ListTransformJobs" API:
+    https://docs.aws.amazon.com/sagemaker/latest/APIReference/API_ListTransformJobs.html.
+    """
+
+    def __init__(self, transform_job, arn):
+        self.transform_job = transform_job
+        self.arn = arn
+
+    @property
+    def response_object(self):
+        response = {
+            "TransformJobName": self.transform_job.job_name,
+            "TransformJobArn": self.arn,
+            "CreationTime": self.transform_job.creation_time,
+            "LastModifiedTime": self.transform_job.last_modified_time,
         }
         return response
 
