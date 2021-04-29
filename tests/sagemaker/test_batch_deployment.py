@@ -362,7 +362,6 @@ def test_deploy_in_synchronous_mode_waits_for_transform_job_creation_to_complete
         s3_output_path="",
         synchronous=True,
     )
-
     deployment_end_time = time.time()
 
     assert (deployment_end_time - deployment_start_time) >= transform_job_creation_latency
@@ -405,7 +404,7 @@ def test_deploy_in_throw_exception_after_transform_job_creation_fails(
 ):
     transform_job_creation_latency = 10
     sagemaker_backend = get_sagemaker_backend(sagemaker_client.meta.region_name)
-    sagemaker_backend.set_endpoint_update_latency(transform_job_creation_latency)
+    sagemaker_backend.set_transform_job_update_latency(transform_job_creation_latency)
 
     boto_caller = botocore.client.BaseClient._make_api_call
 
