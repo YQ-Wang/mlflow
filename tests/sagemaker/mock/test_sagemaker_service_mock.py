@@ -504,12 +504,12 @@ def test_created_transform_job_is_listed_by_list_transform_jobs_function(sagemak
     create_sagemaker_model(sagemaker_client=sagemaker_client, model_name=model_name)
 
     transform_input = {
-        "DataSource": {"S3DataSource": {"S3DataType": "Some data type", "S3Uri": "Some input uri"}}
+        "DataSource": {"S3DataSource": {"S3DataType": "Some Data Type", "S3Uri": "Some Input Uri"}}
     }
 
-    transform_output = {"S3OutputPath": "Some output path"}
+    transform_output = {"S3OutputPath": "Some Output Path"}
 
-    transform_resources = {"InstanceType": "Some instance type", "InstanceCount": 1}
+    transform_resources = {"InstanceType": "Some Instance Type", "InstanceCount": 1}
 
     job_name = "sample-job"
 
@@ -535,12 +535,12 @@ def test_create_transform_job_returns_arn_containing_transform_job_name(sagemake
     create_sagemaker_model(sagemaker_client=sagemaker_client, model_name=model_name)
 
     transform_input = {
-        "DataSource": {"S3DataSource": {"S3DataType": "Some data type", "S3Uri": "Some input uri"}}
+        "DataSource": {"S3DataSource": {"S3DataType": "Some Data Type", "S3Uri": "Some Input Uri"}}
     }
 
-    transform_output = {"S3OutputPath": "Some output path"}
+    transform_output = {"S3OutputPath": "Some Output Path"}
 
-    transform_resources = {"InstanceType": "Some instance type", "InstanceCount": 1}
+    transform_resources = {"InstanceType": "Some Instance Type", "InstanceCount": 1}
 
     job_name = "sample-job"
 
@@ -563,12 +563,12 @@ def test_creating_transform_job_with_name_already_in_use_raises_exception(sagema
     create_sagemaker_model(sagemaker_client=sagemaker_client, model_name=model_name)
 
     transform_input = {
-        "DataSource": {"S3DataSource": {"S3DataType": "Some data type", "S3Uri": "Some input uri"}}
+        "DataSource": {"S3DataSource": {"S3DataType": "Some Data Type", "S3Uri": "Some Input Uri"}}
     }
 
-    transform_output = {"S3OutputPath": "Some output path"}
+    transform_output = {"S3OutputPath": "Some Output Path"}
 
-    transform_resources = {"InstanceType": "Some instance type", "InstanceCount": 1}
+    transform_resources = {"InstanceType": "Some Instance Type", "InstanceCount": 1}
 
     job_name = "sample-job"
 
@@ -598,12 +598,12 @@ def test_all_transform_jobs_are_listed_after_creating_many_transform_jobs(sagema
     create_sagemaker_model(sagemaker_client=sagemaker_client, model_name=model_name)
 
     transform_input = {
-        "DataSource": {"S3DataSource": {"S3DataType": "Some data type", "S3Uri": "Some input uri"}}
+        "DataSource": {"S3DataSource": {"S3DataType": "Some Data Type", "S3Uri": "Some Input Uri"}}
     }
 
-    transform_output = {"S3OutputPath": "Some output path"}
+    transform_output = {"S3OutputPath": "Some Output Path"}
 
-    transform_resources = {"InstanceType": "Some instance type", "InstanceCount": 1}
+    transform_resources = {"InstanceType": "Some Instance Type", "InstanceCount": 1}
 
     job_names = []
 
@@ -634,12 +634,12 @@ def test_describe_transform_job_response_contains_expected_attributes(sagemaker_
     create_sagemaker_model(sagemaker_client=sagemaker_client, model_name=model_name)
 
     transform_input = {
-        "DataSource": {"S3DataSource": {"S3DataType": "Some data type", "S3Uri": "Some input uri"}}
+        "DataSource": {"S3DataSource": {"S3DataType": "Some Data Type", "S3Uri": "Some Input Uri"}}
     }
 
-    transform_output = {"S3OutputPath": "Some output path"}
+    transform_output = {"S3OutputPath": "Some Output Path"}
 
-    transform_resources = {"InstanceType": "Some instance type", "InstanceCount": 1}
+    transform_resources = {"InstanceType": "Some Instance Type", "InstanceCount": 1}
 
     job_name = "sample-job"
 
@@ -655,9 +655,6 @@ def test_describe_transform_job_response_contains_expected_attributes(sagemaker_
     describe_transform_job_response = sagemaker_client.describe_transform_job(
         TransformJobName=job_name
     )
-
-    print(describe_transform_job_response)
-
     assert "TransformJobName" in describe_transform_job_response
     assert "CreationTime" in describe_transform_job_response
     assert "TransformJobArn" in describe_transform_job_response

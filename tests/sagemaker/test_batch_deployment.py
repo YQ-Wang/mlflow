@@ -27,7 +27,7 @@ from mlflow.store.artifact.s3_artifact_repo import S3ArtifactRepository
 from mlflow.tracking.artifact_utils import _download_artifact_from_uri
 
 from tests.helper_functions import set_boto_credentials  # pylint: disable=unused-import
-from tests.sagemaker.mock import mock_sagemaker, TransformJob, TransformOperation
+from tests.sagemaker.mock import mock_sagemaker, TransformJob, TransformJobOperation
 
 TrainedModel = namedtuple("TrainedModel", ["model_path", "run_id", "model_uri"])
 
@@ -420,7 +420,7 @@ def test_deploy_in_throw_exception_after_transform_job_creation_fails(
             transform_job_name = operation_kwargs["TransformJobName"]
             sagemaker_backend.set_transform_job_latest_operation(
                 transform_job_name=transform_job_name,
-                operation=TransformOperation.create_unsuccessful(
+                operation=TransformJobOperation.create_unsuccessful(
                     latency_seconds=transform_job_creation_latency
                 ),
             )
