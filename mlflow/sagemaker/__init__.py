@@ -702,7 +702,7 @@ def deploy_transform_job(
 
 
 def terminate_transform_job(
-    job_name=None, region_name="us-west-2", archive=True, synchronous=True, timeout_seconds=300,
+    job_name, region_name="us-west-2", archive=True, synchronous=True, timeout_seconds=300,
 ):
     """
     Terminate a SageMaker batch transform job.

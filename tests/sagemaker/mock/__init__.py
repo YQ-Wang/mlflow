@@ -270,6 +270,7 @@ class SageMakerBackend(BaseBackend):
         """
         Sets the latency for the following operations that update transform job state:
         - "create_transform_job"
+        - "terminate_transform_job"
         """
         self._transform_job_update_latency_seconds = latency_seconds
 
@@ -624,7 +625,11 @@ class SageMakerBackend(BaseBackend):
                 " that does not exist.".format(job_name=job_name)
             )
 
-        del self.transform_jobs[job_name]
+        self.transform_jobs[
+            job_name
+        ].resource.latest_operation = TransformJobOperation.stop_successful(
+            latency_seconds=self._transform_job_update_latency_seconds
+        )
 
     def list_transform_jobs(self):
         """

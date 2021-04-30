@@ -98,10 +98,10 @@ def test_batch_deployment_with_unsupported_flavor_raises_exception(pretrained_mo
         mfs.deploy_transform_job(
             job_name="bad_flavor",
             model_uri=pretrained_model.model_uri,
-            s3_input_data_type="",
-            s3_input_uri="",
-            content_type="",
-            s3_output_path="",
+            s3_input_data_type="Some Data Type",
+            s3_input_uri="Some Input Uri",
+            content_type="Some Content Type",
+            s3_output_path="Some Output Path",
             flavor=unsupported_flavor,
         )
 
@@ -115,10 +115,10 @@ def test_batch_deployment_with_missing_flavor_raises_exception(pretrained_model)
         mfs.deploy_transform_job(
             job_name="missing-flavor",
             model_uri=pretrained_model.model_uri,
-            s3_input_data_type="",
-            s3_input_uri="",
-            content_type="",
-            s3_output_path="",
+            s3_input_data_type="Some Data Type",
+            s3_input_uri="Some Input Uri",
+            content_type="Some Content Type",
+            s3_output_path="Some Output Path",
             flavor=missing_flavor,
         )
 
@@ -137,10 +137,10 @@ def test_batch_deployment_of_model_with_no_supported_flavors_raises_exception(pr
         mfs.deploy_transform_job(
             job_name="missing-flavor",
             model_uri=logged_model_path,
-            s3_input_data_type="",
-            s3_input_uri="",
-            content_type="",
-            s3_output_path="",
+            s3_input_data_type="Some Data Type",
+            s3_input_uri="Some Input Uri",
+            content_type="Some Content Type",
+            s3_output_path="Some Output Path",
             flavor=None,
         )
 
@@ -156,10 +156,10 @@ def test_deploy_creates_sagemaker_transform_job_and_s3_resources_with_expected_n
     mfs.deploy_transform_job(
         job_name=job_name,
         model_uri=pretrained_model.model_uri,
-        s3_input_data_type="",
-        s3_input_uri="",
-        content_type="",
-        s3_output_path="",
+        s3_input_data_type="Some Data Type",
+        s3_input_uri="Some Input Uri",
+        content_type="Some Content Type",
+        s3_output_path="Some Output Path",
     )
 
     region_name = sagemaker_client.meta.region_name
@@ -193,13 +193,13 @@ def test_deploy_cli_creates_sagemaker_transform_job_and_s3_resources_with_expect
             "--model-uri",
             pretrained_model.model_uri,
             "--input-data-type",
-            "",
+            "Some Data Type",
             "--input-uri",
-            "",
+            "Some Input Uri",
             "--content-type",
-            "",
+            "Some Content Type",
             "--output-path",
-            "",
+            "Some Output Path",
         ],
     )
     assert result.exit_code == 0
@@ -239,10 +239,10 @@ def test_deploy_creates_sagemaker_transform_job_and_s3_resources_with_expected_n
     mfs.deploy_transform_job(
         job_name=job_name,
         model_uri=model_s3_uri,
-        s3_input_data_type="",
-        s3_input_uri="",
-        content_type="",
-        s3_output_path="",
+        s3_input_data_type="Some Data Type",
+        s3_input_uri="Some Input Uri",
+        content_type="Some Content Type",
+        s3_output_path="Some Output Path",
     )
 
     transform_job_description = sagemaker_client.describe_transform_job(TransformJobName=job_name)
@@ -285,13 +285,13 @@ def test_deploy_cli_creates_sagemaker_transform_job_and_s3_resources_with_expect
             "--model-uri",
             model_s3_uri,
             "--input-data-type",
-            "",
+            "Some Data Type",
             "--input-uri",
-            "",
+            "Some Input Uri",
             "--content-type",
-            "",
+            "Some Content Type",
             "--output-path",
-            "",
+            "Some Output Path",
         ],
     )
     assert result.exit_code == 0
@@ -321,20 +321,20 @@ def test_deploying_sagemaker_transform_job_with_preexisting_name_in_create_mode_
     mfs.deploy_transform_job(
         job_name=job_name,
         model_uri=pretrained_model.model_uri,
-        s3_input_data_type="",
-        s3_input_uri="",
-        content_type="",
-        s3_output_path="",
+        s3_input_data_type="Some Data Type",
+        s3_input_uri="Some Input Uri",
+        content_type="Some Content Type",
+        s3_output_path="Some Output Path",
     )
 
     with pytest.raises(MlflowException) as exc:
         mfs.deploy_transform_job(
             job_name=job_name,
             model_uri=pretrained_model.model_uri,
-            s3_input_data_type="",
-            s3_input_uri="",
-            content_type="",
-            s3_output_path="",
+            s3_input_data_type="Some Data Type",
+            s3_input_uri="Some Input Uri",
+            content_type="Some Content Type",
+            s3_output_path="Some Output Path",
         )
 
     assert "a batch transform job with the same name already exists" in exc.value.message
@@ -356,10 +356,10 @@ def test_deploy_in_synchronous_mode_waits_for_transform_job_creation_to_complete
     mfs.deploy_transform_job(
         job_name=job_name,
         model_uri=pretrained_model.model_uri,
-        s3_input_data_type="",
-        s3_input_uri="",
-        content_type="",
-        s3_output_path="",
+        s3_input_data_type="Some Data Type",
+        s3_input_uri="Some Input Uri",
+        content_type="Some Content Type",
+        s3_output_path="Some Output Path",
         synchronous=True,
     )
     deployment_end_time = time.time()
@@ -384,10 +384,10 @@ def test_deploy_create_in_asynchronous_mode_returns_before_transform_job_creatio
     mfs.deploy_transform_job(
         job_name=job_name,
         model_uri=pretrained_model.model_uri,
-        s3_input_data_type="",
-        s3_input_uri="",
-        content_type="",
-        s3_output_path="",
+        s3_input_data_type="Some Data Type",
+        s3_input_uri="Some Input Uri",
+        content_type="Some Content Type",
+        s3_output_path="Some Output Path",
         synchronous=False,
     )
     deployment_end_time = time.time()
@@ -432,11 +432,99 @@ def test_deploy_in_throw_exception_after_transform_job_creation_fails(
         mfs.deploy_transform_job(
             job_name="test-job",
             model_uri=pretrained_model.model_uri,
-            s3_input_data_type="",
-            s3_input_uri="",
-            content_type="",
-            s3_output_path="",
+            s3_input_data_type="Some Data Type",
+            s3_input_uri="Some Input Uri",
+            content_type="Some Content Type",
+            s3_output_path="Some Output Path",
         )
 
     assert "batch transform job failed" in exc.value.message
     assert exc.value.error_code == ErrorCode.Name(INTERNAL_ERROR)
+
+
+@pytest.mark.large
+@mock_sagemaker_aws_services
+def test_attempting_to_terminate_in_asynchronous_mode_without_archiving_throws_exception(
+    pretrained_model,
+):
+    job_name = "test-job"
+    mfs.deploy_transform_job(
+        job_name=job_name,
+        model_uri=pretrained_model.model_uri,
+        s3_input_data_type="Some Data Type",
+        s3_input_uri="Some Input Uri",
+        content_type="Some Content Type",
+        s3_output_path="Some Output Path",
+    )
+
+    with pytest.raises(MlflowException) as exc:
+        mfs.terminate_transform_job(
+            job_name=job_name, archive=False, synchronous=False,
+        )
+
+    assert "Resources must be archived" in exc.value.message
+    assert exc.value.error_code == ErrorCode.Name(INVALID_PARAMETER_VALUE)
+
+
+@pytest.mark.large
+@mock_sagemaker_aws_services
+def test_terminate_in_synchronous_mode_waits_for_transform_job_termination_to_complete_before_returning(
+    pretrained_model, sagemaker_client
+):
+    transform_job_termination_latency = 10
+    get_sagemaker_backend(sagemaker_client.meta.region_name).set_transform_job_update_latency(
+        transform_job_termination_latency
+    )
+
+    job_name = "test-job"
+    termination_start_time = time.time()
+    mfs.deploy_transform_job(
+        job_name=job_name,
+        model_uri=pretrained_model.model_uri,
+        s3_input_data_type="Some Data Type",
+        s3_input_uri="Some Input Uri",
+        content_type="Some Content Type",
+        s3_output_path="Some Output Path",
+        synchronous=True,
+    )
+
+    mfs.terminate_transform_job(
+        job_name=job_name, synchronous=True,
+    )
+    termination_end_time = time.time()
+
+    assert (termination_end_time - termination_start_time) >= transform_job_termination_latency
+    transform_job_description = sagemaker_client.describe_transform_job(TransformJobName=job_name)
+    assert transform_job_description["TransformJobStatus"] == TransformJob.STATUS_STOPPED
+
+
+@pytest.mark.large
+@mock_sagemaker_aws_services
+def test_terminate_in_asynchronous_mode_returns_before_transform_job_termination_completes(
+    pretrained_model, sagemaker_client
+):
+    transform_job_termination_latency = 10
+    get_sagemaker_backend(sagemaker_client.meta.region_name).set_transform_job_update_latency(
+        transform_job_termination_latency
+    )
+
+    job_name = "test-job"
+    termination_start_time = time.time()
+    mfs.deploy_transform_job(
+        job_name=job_name,
+        model_uri=pretrained_model.model_uri,
+        s3_input_data_type="Some Data Type",
+        s3_input_uri="Some Input Uri",
+        content_type="Some Content Type",
+        s3_output_path="Some Output Path",
+        synchronous=False,
+    )
+
+    mfs.terminate_transform_job(
+        job_name=job_name, synchronous=False,
+    )
+    termination_end_time = time.time()
+
+    assert (termination_end_time - termination_start_time) < transform_job_termination_latency
+    transform_job_description = sagemaker_client.describe_transform_job(TransformJobName=job_name)
+    assert transform_job_description["TransformJobStatus"] == TransformJob.STATUS_STOPPING
