@@ -1,15 +1,16 @@
 import collections
-from distutils.version import LooseVersion
-from itertools import islice
+from packaging.version import Version
 import inspect
 import logging
 from numbers import Number
 import numpy as np
 import time
+import warnings
 
 import mlflow
 from mlflow.entities import Metric, Param
 from mlflow.tracking.client import MlflowClient
+from mlflow.utils import _chunk_dict, _truncate_dict
 from mlflow.utils.autologging_utils import try_mlflow_log
 from mlflow.utils.file_utils import TempDir
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
@@ -73,7 +74,9 @@ def _get_args_for_metrics(fit_func, fit_args, fit_kwargs):
     :param fit_args: Positional arguments given to fit_func.
     :param fit_kwargs: Keyword arguments given to fit_func.
 
-    :returns: A tuple of either (X, y, sample_weight) or (X, y).
+    :returns: A tuple of either (X, y, sample_weight), where `y` and `sample_weight` may be
+              `None` if the specified `fit_args` and `fit_kwargs` do not specify labels or
+              a sample weighting.
     """
 
     def _get_Xy(args, kwargs, X_var_name, y_var_name):
@@ -83,10 +86,10 @@ def _get_args_for_metrics(fit_func, fit_args, fit_kwargs):
 
         # corresponds to: model.fit(X, <y_var_name>=y)
         if len(args) == 1:
-            return args[0], kwargs[y_var_name]
+            return args[0], kwargs.get(y_var_name)
 
         # corresponds to: model.fit(<X_var_name>=X, <y_var_name>=y)
-        return kwargs[X_var_name], kwargs[y_var_name]
+        return kwargs[X_var_name], kwargs.get(y_var_name)
 
     def _get_sample_weight(arg_names, args, kwargs):
         sample_weight_index = arg_names.index(_SAMPLE_WEIGHT)
@@ -409,35 +412,39 @@ def _log_warning_for_artifacts(func_name, func_call, err):
 
 
 def _log_specialized_estimator_content(
-    fitted_estimator, run_id, prefix, X, y_true, sample_weight=None
+    fitted_estimator, run_id, prefix, X, y_true=None, sample_weight=None
 ):
     import sklearn
 
     mlflow_client = MlflowClient()
     metrics = dict()
-    try:
-        if sklearn.base.is_classifier(fitted_estimator):
-            metrics = _get_classifier_metrics(fitted_estimator, prefix, X, y_true, sample_weight)
-        elif sklearn.base.is_regressor(fitted_estimator):
-            metrics = _get_regressor_metrics(fitted_estimator, prefix, X, y_true, sample_weight)
-    except Exception as err:
-        msg = (
-            "Failed to autolog metrics for "
-            + fitted_estimator.__class__.__name__
-            + ". Logging error: "
-            + str(err)
-        )
-        _logger.warning(msg)
-    else:
-        # batch log all metrics
-        try_mlflow_log(
-            mlflow_client.log_batch,
-            run_id,
-            metrics=[
-                Metric(key=str(key), value=value, timestamp=int(time.time() * 1000), step=0)
-                for key, value in metrics.items()
-            ],
-        )
+
+    if y_true is not None:
+        try:
+            if sklearn.base.is_classifier(fitted_estimator):
+                metrics = _get_classifier_metrics(
+                    fitted_estimator, prefix, X, y_true, sample_weight
+                )
+            elif sklearn.base.is_regressor(fitted_estimator):
+                metrics = _get_regressor_metrics(fitted_estimator, prefix, X, y_true, sample_weight)
+        except Exception as err:
+            msg = (
+                "Failed to autolog metrics for "
+                + fitted_estimator.__class__.__name__
+                + ". Logging error: "
+                + str(err)
+            )
+            _logger.warning(msg)
+        else:
+            # batch log all metrics
+            try_mlflow_log(
+                mlflow_client.log_batch,
+                run_id,
+                metrics=[
+                    Metric(key=str(key), value=value, timestamp=int(time.time() * 1000), step=0)
+                    for key, value in metrics.items()
+                ],
+            )
 
     if sklearn.base.is_classifier(fitted_estimator):
         try:
@@ -473,10 +480,11 @@ def _log_specialized_estimator_content(
     return metrics
 
 
-def _log_estimator_content(estimator, run_id, prefix, X, y_true, sample_weight):
+def _log_estimator_content(estimator, run_id, prefix, X, y_true=None, sample_weight=None):
     """
     Logs content for the given estimator, which includes metrics and artifacts that might be
-    tailored to the estimator's type (e.g., regression vs classification).
+    tailored to the estimator's type (e.g., regression vs classification). Training labels
+    are required for metric computation; metrics will be omitted if labels are not available.
 
     :param estimator: The estimator used to compute metrics and artifacts.
     :param run_id: The run under which the content is logged.
@@ -496,7 +504,7 @@ def _log_estimator_content(estimator, run_id, prefix, X, y_true, sample_weight):
         sample_weight=sample_weight,
     )
 
-    if hasattr(estimator, "score"):
+    if hasattr(estimator, "score") and y_true is not None:
         try:
             # Use the sample weight only if it is present in the score args
             score_arg_names = _get_arg_names(estimator.score)
@@ -517,46 +525,6 @@ def _log_estimator_content(estimator, run_id, prefix, X, y_true, sample_weight):
             metrics[score_key] = score
 
     return metrics
-
-
-def _chunk_dict(d, chunk_size):
-    # Copied from: https://stackoverflow.com/a/22878842
-
-    it = iter(d)
-    for _ in range(0, len(d), chunk_size):
-        yield {k: d[k] for k in islice(it, chunk_size)}
-
-
-def _truncate_dict(d, max_key_length=None, max_value_length=None):
-    def _truncate_and_ellipsize(value, max_length):
-        return str(value)[: (max_length - 3)] + "..."
-
-    key_is_none = max_key_length is None
-    val_is_none = max_value_length is None
-
-    if key_is_none and val_is_none:
-        raise ValueError("Must specify at least either `max_key_length` or `max_value_length`")
-
-    truncated = {}
-    for k, v in d.items():
-        should_truncate_key = (not key_is_none) and (len(str(k)) > max_key_length)
-        should_truncate_val = (not val_is_none) and (len(str(v)) > max_value_length)
-
-        new_k = _truncate_and_ellipsize(k, max_key_length) if should_truncate_key else k
-        if should_truncate_key:
-            # Use the truncated key for warning logs to avoid noisy printing to stdout
-            msg = "Truncated the key `{}`".format(new_k)
-            _logger.warning(msg)
-
-        new_v = _truncate_and_ellipsize(v, max_value_length) if should_truncate_val else v
-        if should_truncate_val:
-            # Use the truncated key and value for warning logs to avoid noisy printing to stdout
-            msg = "Truncated the value of the key `{}`. Truncated value: `{}`".format(new_k, new_v)
-            _logger.warning(msg)
-
-        truncated[new_k] = new_v
-
-    return truncated
 
 
 def _get_meta_estimators_for_autologging():
@@ -612,7 +580,32 @@ def _log_parameter_search_results_as_artifact(cv_results_df, run_id):
         try_mlflow_log(MlflowClient().log_artifact, run_id, results_path)
 
 
-def _create_child_runs_for_parameter_search(cv_estimator, parent_run, child_tags=None):
+# Log how many child runs will be created vs omitted based on `max_tuning_runs`.
+def _log_child_runs_info(max_tuning_runs, total_runs):
+    rest = total_runs - max_tuning_runs
+
+    # Set logging statement for runs to be logged.
+    if max_tuning_runs == 0:
+        logging_phrase = "no runs"
+    elif max_tuning_runs == 1:
+        logging_phrase = "the best run"
+    else:
+        logging_phrase = "the {} best runs".format(max_tuning_runs)
+
+    # Set logging statement for runs to be omitted.
+    if rest <= 0:
+        omitting_phrase = "no runs"
+    elif rest == 1:
+        omitting_phrase = "one run"
+    else:
+        omitting_phrase = "{} runs".format(rest)
+
+    _logger.info("Logging %s, %s will be omitted.", logging_phrase, omitting_phrase)
+
+
+def _create_child_runs_for_parameter_search(
+    cv_estimator, parent_run, max_tuning_runs, child_tags=None
+):
     """
     Creates a collection of child runs for a parameter search training session.
     Runs are reconstructed from the `cv_results_` attribute of the specified trained
@@ -629,6 +622,12 @@ def _create_child_runs_for_parameter_search(cv_estimator, parent_run, child_tags
                        for each child run.
     """
     import pandas as pd
+
+    def first_custom_rank_column(df):
+        column_names = df.columns.values
+        for col_name in column_names:
+            if "rank_test_" in col_name:
+                return col_name
 
     client = MlflowClient()
     # Use the start time of the parent parameter search run as a rough estimate for the
@@ -648,9 +647,26 @@ def _create_child_runs_for_parameter_search(cv_estimator, parent_run, child_tags
     # the seed estimator and update them with parameter subset specified
     # in the result row
     base_params = seed_estimator.get_params(deep=should_log_params_deeply)
-
     cv_results_df = pd.DataFrame.from_dict(cv_estimator.cv_results_)
-    for _, result_row in cv_results_df.iterrows():
+
+    if max_tuning_runs is None:
+        cv_results_best_n_df = cv_results_df
+    else:
+        rank_column_name = "rank_test_score"
+        if rank_column_name not in cv_results_df.columns.values:
+            rank_column_name = first_custom_rank_column(cv_results_df)
+            warnings.warn(
+                "Top {} child runs will be created based on ordering in {} column.".format(
+                    max_tuning_runs, rank_column_name,
+                )
+                + " You can choose not to limit the number of child runs created by"
+                + " setting `max_tuning_runs=None`."
+            )
+        cv_results_best_n_df = cv_results_df.nsmallest(max_tuning_runs, rank_column_name)
+        # Log how many child runs will be created vs omitted.
+        _log_child_runs_info(max_tuning_runs, len(cv_results_df))
+
+    for _, result_row in cv_results_best_n_df.iterrows():
         tags_to_log = dict(child_tags) if child_tags else {}
         tags_to_log.update({MLFLOW_PARENT_RUN_ID: parent_run.info.run_id})
         tags_to_log.update(_get_estimator_info_tags(seed_estimator))
@@ -715,7 +731,7 @@ def _create_child_runs_for_parameter_search(cv_estimator, parent_run, child_tags
 def _is_supported_version():
     import sklearn
 
-    return LooseVersion(sklearn.__version__) >= LooseVersion(_MIN_SKLEARN_VERSION)
+    return Version(sklearn.__version__) >= Version(_MIN_SKLEARN_VERSION)
 
 
 # Util function to check whether a metric is able to be computed in given sklearn version
@@ -725,7 +741,7 @@ def _is_metric_supported(metric_name):
     # This dict can be extended to store special metrics' specific supported versions
     _metric_supported_version = {"roc_auc_score": "0.22.2"}
 
-    return LooseVersion(sklearn.__version__) >= LooseVersion(_metric_supported_version[metric_name])
+    return Version(sklearn.__version__) >= Version(_metric_supported_version[metric_name])
 
 
 # Util function to check whether artifact plotting functions are able to be computed
@@ -733,7 +749,7 @@ def _is_metric_supported(metric_name):
 def _is_plotting_supported():
     import sklearn
 
-    return LooseVersion(sklearn.__version__) >= LooseVersion("0.22.0")
+    return Version(sklearn.__version__) >= Version("0.22.0")
 
 
 def _all_estimators():

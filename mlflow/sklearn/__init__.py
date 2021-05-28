@@ -36,6 +36,7 @@ from mlflow.utils.autologging_utils import (
     try_mlflow_log,
     INPUT_EXAMPLE_SAMPLE_ROWS,
     resolve_input_example_and_signature,
+    _get_new_training_session_class,
 )
 from mlflow.tracking._model_registry import DEFAULT_AWAIT_MAX_SLEEP_SECONDS
 
@@ -47,6 +48,7 @@ SERIALIZATION_FORMAT_CLOUDPICKLE = "cloudpickle"
 SUPPORTED_SERIALIZATION_FORMATS = [SERIALIZATION_FORMAT_PICKLE, SERIALIZATION_FORMAT_CLOUDPICKLE]
 
 _logger = logging.getLogger(__name__)
+_SklearnTrainingSession = _get_new_training_session_class()
 
 
 def get_default_conda_env(include_cloudpickle=False):
@@ -61,7 +63,7 @@ def get_default_conda_env(include_cloudpickle=False):
         import cloudpickle
 
         pip_deps += ["cloudpickle=={}".format(cloudpickle.__version__)]
-    return _mlflow_conda_env(additional_pip_deps=pip_deps, additional_conda_channels=None)
+    return _mlflow_conda_env(additional_pip_deps=pip_deps)
 
 
 def save_model(
@@ -451,82 +453,6 @@ def load_model(model_uri):
     )
 
 
-# NOTE: The current implementation doesn't guarantee thread-safety, but that's okay for now because:
-# 1. We don't currently have any use cases for allow_children=True.
-# 2. The list append & pop operations are thread-safe, so we will always clear the session stack
-#    once all _SklearnTrainingSessions exit.
-class _SklearnTrainingSession(object):
-    _session_stack = []
-
-    def __init__(self, clazz, allow_children=True):
-        """
-        A session manager for nested autologging runs.
-
-        :param clazz: A class object that this session originates from.
-        :param allow_children: If True, allows autologging in child sessions.
-                               If False, disallows autologging in all descendant sessions.
-
-        Example:
-
-        >>> class Parent: pass
-        >>> class Child: pass
-        >>> class Grandchild: pass
-
-        >>> with _SklearnTrainingSession(Parent, False) as p:
-        ...     with _SklearnTrainingSession(Child, True) as c:
-        ...         with _SklearnTrainingSession(Grandchild, True) as g:
-        ...             print(p.should_log())
-        ...             print(c.should_log())
-        ...             print(g.should_log())
-        True
-        False
-        False
-
-        >>> with _SklearnTrainingSession(Parent, True) as p:
-        ...     with _SklearnTrainingSession(Child, False) as c:
-        ...         with _SklearnTrainingSession(Grandchild, True) as g:
-        ...             print(p.should_log())
-        ...             print(c.should_log())
-        ...             print(g.should_log())
-        True
-        True
-        False
-
-        >>> with _SklearnTrainingSession(Child, True) as c1:
-        ...     with _SklearnTrainingSession(Child, True) as c2:
-        ...             print(c1.should_log())
-        ...             print(c2.should_log())
-        True
-        False
-        """
-        self.allow_children = allow_children
-        self.clazz = clazz
-        self._parent = None
-
-    def __enter__(self):
-        if len(_SklearnTrainingSession._session_stack) > 0:
-            self._parent = _SklearnTrainingSession._session_stack[-1]
-            self.allow_children = (
-                _SklearnTrainingSession._session_stack[-1].allow_children and self.allow_children
-            )
-        _SklearnTrainingSession._session_stack.append(self)
-        return self
-
-    def __exit__(self, tp, val, traceback):
-        _SklearnTrainingSession._session_stack.pop()
-
-    def should_log(self):
-        """
-        Returns True when at least one of the following conditions satisfies:
-
-        1. This session is the root session.
-        2. The parent session allows autologging and its class differs from this session's class.
-        """
-        return (self._parent is None) or (
-            self._parent.allow_children and self._parent.clazz != self.clazz
-        )
-
-
 @experimental
 @autologging_integration(FLAVOR_NAME)
 def autolog(
@@ -537,6 +463,7 @@ def autolog(
     exclusive=False,
     disable_for_unsupported_versions=False,
     silent=False,
+    max_tuning_runs=5,
 ):  # pylint: disable=unused-argument
     """
     Enables (or disables) and configures autologging for scikit-learn estimators.
@@ -728,6 +655,16 @@ def autolog(
     :param silent: If ``True``, suppress all event logs and warnings from MLflow during scikit-learn
                    autologging. If ``False``, show all events and warnings during scikit-learn
                    autologging.
+    :param max_tuning_runs: The maximum number of child Mlflow runs created for hyperparameter
+                            search estimators. To create child runs for the best `k` results from
+                            the search, set `max_tuning_runs` to `k`. The default value is to track
+                            the best 5 search parameter sets. If `max_tuning_runs=None`, then
+                            a child run is created for each search parameter set. Note: The best k
+                            results is based on ordering in `rank_test_score`. In the case of
+                            multi-metric evaluation with a custom scorer, the first scorer’s
+                            `rank_test_score_<scorer_name>` will be used to select the best k
+                            results. To change metric used for selecting best k results, change
+                            ordering of dict passed as `scoring` parameter for estimator.
     """
     import pandas as pd
     import sklearn
@@ -755,6 +692,14 @@ def autolog(
         MAX_PARAM_VAL_LENGTH,
         MAX_ENTITY_KEY_LENGTH,
     )
+
+    if max_tuning_runs is not None and max_tuning_runs < 0:
+        raise MlflowException(
+            message=(
+                "`max_tuning_runs` must be non-negative, instead got {}.".format(max_tuning_runs)
+            ),
+            error_code=INVALID_PARAMETER_VALUE,
+        )
 
     if not _is_supported_version():
         warnings.warn(
@@ -830,7 +775,7 @@ def autolog(
         (X, y_true, sample_weight) = _get_args_for_metrics(estimator.fit, args, kwargs)
 
         # log common metrics and artifacts for estimators (classifier, regressor)
-        _log_estimator_content(
+        logged_metrics = _log_estimator_content(
             estimator=estimator,
             prefix=_TRAINING_PREFIX,
             run_id=mlflow.active_run().info.run_id,
@@ -838,6 +783,12 @@ def autolog(
             y_true=y_true,
             sample_weight=sample_weight,
         )
+        if y_true is None and not logged_metrics:
+            _logger.warning(
+                "Training metrics will not be recorded because training labels were not specified."
+                " To automatically record training metrics, provide training labels as inputs to"
+                " the model training function."
+            )
 
         def get_input_example():
             # Fetch an input example using the first several rows of the array-like
@@ -892,6 +843,7 @@ def autolog(
                     _create_child_runs_for_parameter_search(
                         cv_estimator=estimator,
                         parent_run=mlflow.active_run(),
+                        max_tuning_runs=max_tuning_runs,
                         child_tags=child_tags,
                     )
                 except Exception as e:
